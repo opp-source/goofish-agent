@@ -1,0 +1,26 @@
+{
+  "name": "goofish-local-daemon",
+  "version": "1.0.0",
+  "description": "闲鱼销售 Agent 本地守护程序",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test src/**/*.test.js"
+  },
+  "keywords": [
+    "goofish",
+    "agent",
+    "daemon"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "eventsource": "^2.0.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

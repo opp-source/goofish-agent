@@ -1,0 +1,25 @@
+{
+  "name": "goofish-cloud-worker",
+  "version": "1.0.0",
+  "description": "闲鱼销售 Agent 云端同步程序",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "keywords": [
+    "goofish",
+    "cloudflare-worker",
+    "agent"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
