@@ -46,7 +46,7 @@ export class TmuxManager {
         return;
       }
 
-      const command = `tmux send-keys -t ${this.sessionName} 'cd ${workDir} && ${claudePath} --dangerously-skip-permissions'`;
+      const command = `tmux send-keys -t ${this.sessionName} 'cd ${workDir} && ${claudePath} --dangerously-skip-permissions /goofish-init'`;
       await execAsync(command);
       
       await sleep(500);

@@ -5,7 +5,7 @@
 ### ✅ 已部署成功
 
 **云端 Worker**
-- URL: `https://goofish-agent-worker.devinwen123.workers.dev`
+- URL: `https://goofish-agent-worker.wgy.us.kg`
 - KV Namespace ID: `65b632e92d1b4c05ab8620f091572989`
 - API Key: `a9441d97d2e940752a5780111ec6e36588975ad9d4f6c1af88a2e987ce8daa04`
 - Durable Object: `MessagePubSub` (使用 SQLite 后端)
@@ -42,19 +42,19 @@
 
 ```bash
 # 查看状态
-curl https://goofish-agent-worker.devinwen123.workers.dev/status | jq
+curl https://goofish-agent-worker.wgy.us.kg/status | jq
 
 # 测试 SSE
-curl -N https://goofish-agent-worker.devinwen123.workers.dev/events
+curl -N https://goofish-agent-worker.wgy.us.kg/events
 
 # 发送测试消息
-curl -X POST https://goofish-agent-worker.devinwen123.workers.dev/api/message \
+curl -X POST https://goofish-agent-worker.wgy.us.kg/api/message \
   -H "Content-Type: application/json" \
   -H "X-API-Key: a9441d97d2e940752a5780111ec6e36588975ad9d4f6c1af88a2e987ce8daa04" \
   -d '{"type":"test","buyerName":"测试","lastMessage":"你好"}'
 
 # 访问状态页面（浏览器）
-open https://goofish-agent-worker.devinwen123.workers.dev/status
+open https://goofish-agent-worker.wgy.us.kg/status
 
 # 查看守护程序日志
 tail -f /tmp/goofish-daemon.log

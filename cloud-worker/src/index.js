@@ -1,7 +1,5 @@
-import { MessagePubSub } from './durable-object.js';
-import { handleStatusPage } from './status-page.js';
 import { sendTelegramMessage } from './telegram.js';
-import { checkHeartbeats } from './monitor.js';
+import { MessagePubSub } from './durable-object.js';
 
 export { MessagePubSub };
 
@@ -10,11 +8,10 @@ export default {
     const url = new URL(request.url);
     const method = request.method;
 
-    // CORS 预检请求
     if (method === 'OPTIONS') {
       return new Response(null, {
         headers: {
-          'Access-Control-Allow-Origin': 'https://www.goofish.com',
+          'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
           'Access-Control-Max-Age': '86400'
@@ -22,17 +19,22 @@ export default {
       });
     }
 
-    // 路由处理
     try {
-      // API 认证（除了状态页面）
-      if (!url.pathname.startsWith('/status') && !url.pathname.startsWith('/events')) {
-        const apiKey = request.headers.get('X-API-Key');
-        if (apiKey !== env.API_KEY) {
-          return jsonResponse({ success: false, error: 'Invalid API key' }, 401);
-        }
+      if (url.pathname === '/' && method === 'GET') {
+        return await handleStatusPage(env);
       }
 
-      // 路由匹配
+      if (url.pathname === '/events' && method === 'GET') {
+        const id = env.MESSAGE_PUBSUB.idFromName('global');
+        const stub = env.MESSAGE_PUBSUB.get(id);
+        return stub.fetch(request);
+      }
+
+      const apiKey = request.headers.get('X-API-Key');
+      if (apiKey !== env.API_KEY) {
+        return jsonResponse({ success: false, error: 'Invalid API key' }, 401);
+      }
+
       if (url.pathname === '/api/message' && method === 'POST') {
         return await handleMessage(request, env);
       }
@@ -41,32 +43,14 @@ export default {
         return await handleError(request, env);
       }
 
-      if (url.pathname === '/events' && method === 'GET') {
-        return await handleSSE(request, env);
-      }
-
-      if (url.pathname === '/heartbeat/browser' && method === 'POST') {
-        return await handleBrowserHeartbeat(request, env);
-      }
-
-      if (url.pathname === '/heartbeat/daemon' && method === 'POST') {
-        return await handleDaemonHeartbeat(request, env);
-      }
-
-      if (url.pathname === '/status' && method === 'GET') {
-        return await handleStatusPage(request, env);
-      }
-
-      // 管理接口
-      if (url.pathname === '/admin/restart-browser' && method === 'POST') {
-        return await handleRestartBrowser(env);
-      }
-
       if (url.pathname === '/admin/test-notification' && method === 'POST') {
         return await handleTestNotification(env);
       }
 
-      // 404
+      if (url.pathname === '/admin/status' && method === 'GET') {
+        return await handleStatus(env);
+      }
+
       return jsonResponse({ error: 'Not Found' }, 404);
 
     } catch (error) {
@@ -78,8 +62,37 @@ export default {
     }
   },
 
-  async scheduled(event, env, ctx) {
-    ctx.waitUntil(checkHeartbeats(env));
+  async queue(batch, env, ctx) {
+    const id = env.MESSAGE_PUBSUB.idFromName('global');
+    const stub = env.MESSAGE_PUBSUB.get(id);
+    
+    for (const message of batch.messages) {
+      try {
+        console.log('处理队列消息:', message.body);
+        
+        const response = await stub.fetch('http://internal/broadcast', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': env.API_KEY
+          },
+          body: JSON.stringify(message.body)
+        });
+        
+        const result = await response.json();
+        
+        if (result.delivered > 0) {
+          message.ack();
+        } else {
+          console.log('无 SSE 连接，消息将重试');
+          message.retry();
+        }
+        
+      } catch (error) {
+        console.error('队列消息处理失败:', error);
+        message.retry();
+      }
+    }
   }
 };
 
@@ -88,29 +101,41 @@ async function handleMessage(request, env) {
   
   console.log('收到消息:', message);
 
-  // 保存最近消息
-  const recentMessages = await env.GOOFISH_KV.get('recent_messages', { type: 'json' }) || [];
-  recentMessages.unshift({
-    ...message,
-    timestamp: Date.now()
-  });
-  // 只保留最近 20 条
-  if (recentMessages.length > 20) {
-    recentMessages.pop();
-  }
-  await env.GOOFISH_KV.put('recent_messages', JSON.stringify(recentMessages));
-
-  // 发布到 Durable Objects
   const id = env.MESSAGE_PUBSUB.idFromName('global');
   const stub = env.MESSAGE_PUBSUB.get(id);
   
-  await stub.fetch('https://internal/publish', {
+  const response = await stub.fetch('http://internal/broadcast', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(message)
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': env.API_KEY
+    },
+    body: JSON.stringify({
+      type: 'new_message',
+      data: message,
+      timestamp: Date.now()
+    })
+  });
+  
+  const result = await response.json();
+  
+  if (result.delivered > 0) {
+    console.log(`消息已通过 SSE 推送给 ${result.delivered} 个客户端`);
+    return jsonResponse({ 
+      success: true, 
+      delivered: 'sse', 
+      clients: result.delivered 
+    });
+  }
+
+  console.log('无 SSE 连接，消息存入队列');
+  await env.MESSAGE_QUEUE.send({
+    type: 'new_message',
+    data: message,
+    timestamp: Date.now()
   });
 
-  return jsonResponse({ success: true, message: '消息已接收' });
+  return jsonResponse({ success: true, delivered: 'queue' });
 }
 
 async function handleError(request, env) {
@@ -118,13 +143,6 @@ async function handleError(request, env) {
   
   console.error('收到错误报告:', errorData);
 
-  // 保存错误信息
-  await env.GOOFISH_KV.put('last_error', JSON.stringify({
-    ...errorData,
-    timestamp: Date.now()
-  }));
-
-  // 发送 Telegram 通知
   if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
     await sendTelegramMessage(
       env.TELEGRAM_BOT_TOKEN,
@@ -134,48 +152,6 @@ async function handleError(request, env) {
   }
 
   return jsonResponse({ success: true });
-}
-
-async function handleSSE(request, env) {
-  const id = env.MESSAGE_PUBSUB.idFromName('global');
-  const stub = env.MESSAGE_PUBSUB.get(id);
-  
-  return stub.fetch('https://internal/connect', {
-    headers: request.headers
-  });
-}
-
-async function handleBrowserHeartbeat(request, env) {
-  const timestamp = Date.now().toString();
-  await env.GOOFISH_KV.put('heartbeat:browser', timestamp, { expirationTtl: 600 });
-  await env.GOOFISH_KV.put('status:browser', 'online');
-  
-  return jsonResponse({ success: true });
-}
-
-async function handleDaemonHeartbeat(request, env) {
-  const timestamp = Date.now().toString();
-  await env.GOOFISH_KV.put('heartbeat:daemon', timestamp, { expirationTtl: 600 });
-  await env.GOOFISH_KV.put('status:daemon', 'online');
-  
-  return jsonResponse({ success: true });
-}
-
-async function handleRestartBrowser(env) {
-  // 发布重启指令到 Durable Objects
-  const id = env.MESSAGE_PUBSUB.idFromName('global');
-  const stub = env.MESSAGE_PUBSUB.get(id);
-  
-  await stub.fetch('https://internal/publish', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      type: 'restart_browser',
-      timestamp: Date.now()
-    })
-  });
-
-  return jsonResponse({ success: true, message: '重启指令已发送' });
 }
 
 async function handleTestNotification(env) {
@@ -193,6 +169,122 @@ async function handleTestNotification(env) {
   );
 
   return jsonResponse({ success: true, message: '测试消息已发送' });
+}
+
+async function handleStatus(env) {
+  const id = env.MESSAGE_PUBSUB.idFromName('global');
+  const stub = env.MESSAGE_PUBSUB.get(id);
+  
+  const response = await stub.fetch('http://internal/status');
+  const status = await response.json();
+  
+  return jsonResponse({
+    success: true,
+    ...status
+  });
+}
+
+async function handleStatusPage(env) {
+  const id = env.MESSAGE_PUBSUB.idFromName('global');
+  const stub = env.MESSAGE_PUBSUB.get(id);
+  
+  const response = await stub.fetch('http://internal/status');
+  const status = await response.json();
+  
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>闲鱼 Agent 状态</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .card {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    h1 {
+      margin: 0 0 20px 0;
+      color: #333;
+    }
+    .status-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .status-item:last-child {
+      border-bottom: none;
+    }
+    .label {
+      color: #666;
+    }
+    .value {
+      font-weight: 600;
+      color: #333;
+    }
+    .online {
+      color: #4caf50;
+    }
+    .offline {
+      color: #f44336;
+    }
+    .refresh-btn {
+      background: #2196f3;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+    .refresh-btn:hover {
+      background: #1976d2;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🐟 闲鱼 Agent 状态</h1>
+    <div class="status-item">
+      <span class="label">SSE 连接数</span>
+      <span class="value ${status.connected > 0 ? 'online' : 'offline'}">${status.connected}</span>
+    </div>
+    <div class="status-item">
+      <span class="label">守护程序状态</span>
+      <span class="value ${status.connected > 0 ? 'online' : 'offline'}">${status.connected > 0 ? '在线' : '离线'}</span>
+    </div>
+    <div class="status-item">
+      <span class="label">最后更新</span>
+      <span class="value">${new Date(status.timestamp).toLocaleString('zh-CN')}</span>
+    </div>
+    <button class="refresh-btn" onclick="location.reload()">刷新状态</button>
+  </div>
+  
+  <div class="card">
+    <h2>系统架构</h2>
+    <p>浏览器 → Worker → Durable Object → SSE → 本地守护程序 → Claude</p>
+    <p style="color: #666; font-size: 14px;">Queue 作为备用通道（SSE 断开时使用）</p>
+  </div>
+</body>
+</html>
+  `;
+  
+  return new Response(html, {
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8'
+    }
+  });
 }
 
 function jsonResponse(data, status = 200) {

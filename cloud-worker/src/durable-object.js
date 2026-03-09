@@ -2,66 +2,72 @@ export class MessagePubSub {
   constructor(state, env) {
     this.state = state;
     this.env = env;
-    this.sessions = new Map();
+    this.sessions = new Set();
   }
 
   async fetch(request) {
     const url = new URL(request.url);
-    console.log('Durable Object fetch:', url.pathname);
-
-    // SSE 连接
-    if (url.pathname === '/connect') {
+    
+    if (url.pathname === '/events') {
       return this.handleSSE(request);
     }
-
-    // 发布消息
-    if (url.pathname === '/publish') {
-      const message = await request.json();
-      return this.publish(message);
+    
+    if (url.pathname === '/broadcast') {
+      return this.handleBroadcast(request);
     }
-
+    
+    if (url.pathname === '/status') {
+      return new Response(JSON.stringify({
+        connected: this.sessions.size,
+        timestamp: Date.now()
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    
     return new Response('Not Found', { status: 404 });
   }
 
   async handleSSE(request) {
-    const sessionId = crypto.randomUUID();
-    const self = this; // 保存 this 引用
+    const apiKey = request.headers.get('X-API-Key');
+    if (apiKey !== this.env.API_KEY) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+
+    const { readable, writable } = new TransformStream();
+    const writer = writable.getWriter();
+    const encoder = new TextEncoder();
     
-    // 创建自定义的 ReadableStream
-    const stream = new ReadableStream({
-      async start(controller) {
-        const encoder = new TextEncoder();
-        
-        const writer = {
-          write: async (data) => {
-            try {
-              controller.enqueue(encoder.encode(data));
-            } catch (e) {
-              console.error('Write error:', e);
-            }
-          },
-          close: () => {
-            try {
-              controller.close();
-            } catch (e) {}
-          }
-        };
-        
-        self.sessions.set(sessionId, writer);
-        
-        // 发送初始消息
-        await writer.write('data: {"type":"connected"}\n\n');
-        console.log(`SSE session ${sessionId} started`);
-      },
-      
-      cancel() {
-        console.log(`SSE session ${sessionId} cancelled`);
-        self.sessions.delete(sessionId);
+    this.sessions.add(writer);
+    
+    writer.write(encoder.encode(`data: ${JSON.stringify({ 
+      type: 'connected', 
+      timestamp: Date.now() 
+    })}\n\n`));
+    
+    const heartbeatInterval = setInterval(async () => {
+      try {
+        await writer.write(encoder.encode(`data: ${JSON.stringify({ 
+          type: 'heartbeat', 
+          timestamp: Date.now() 
+        })}\n\n`));
+      } catch (err) {
+        clearInterval(heartbeatInterval);
+        this.sessions.delete(writer);
+      }
+    }, 30000);
+    
+    request.signal.addEventListener('abort', async () => {
+      clearInterval(heartbeatInterval);
+      this.sessions.delete(writer);
+      try {
+        await writer.close();
+      } catch (err) {
+        // Ignore
       }
     });
-
-    // 返回 SSE 流
-    return new Response(stream, {
+    
+    return new Response(readable, {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
@@ -71,25 +77,36 @@ export class MessagePubSub {
     });
   }
 
-  async publish(message) {
+  async handleBroadcast(request) {
+    const apiKey = request.headers.get('X-API-Key');
+    if (apiKey !== this.env.API_KEY) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+
+    const message = await request.json();
     const data = `data: ${JSON.stringify(message)}\n\n`;
-
-    const disconnected = [];
-
-    for (const [sessionId, writer] of this.sessions) {
+    const encoder = new TextEncoder();
+    
+    let delivered = 0;
+    const failed = [];
+    
+    for (const writer of this.sessions) {
       try {
-        await writer.write(data);
-      } catch (error) {
-        // 连接已断开
-        disconnected.push(sessionId);
+        await writer.write(encoder.encode(data));
+        delivered++;
+      } catch (err) {
+        failed.push(writer);
       }
     }
-
-    // 清理断开的连接
-    for (const sessionId of disconnected) {
-      this.sessions.delete(sessionId);
-    }
-
-    return new Response('OK');
+    
+    failed.forEach(writer => this.sessions.delete(writer));
+    
+    return new Response(JSON.stringify({
+      success: true,
+      delivered,
+      total: this.sessions.size
+    }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 }

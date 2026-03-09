@@ -76,21 +76,28 @@ wrangler kv:namespace create GOOFISH_KV
 
 记录返回的 namespace ID，更新到 `wrangler.toml`。
 
-### 3.2 配置 wrangler.toml
+### 3.2 创建 Cloudflare Queue
+
+```bash
+wrangler queues create message-queue
+```
+
+### 3.3 配置 wrangler.toml
 
 ```toml
 name = "goofish-agent-worker"
 main = "src/index.js"
 compatibility_date = "2026-03-08"
 
-# Durable Objects
-[[durable_objects.bindings]]
-name = "MESSAGE_PUBSUB"
-class_name = "MessagePubSub"
+# Cloudflare Queue
+[[queues.producers]]
+queue = "message-queue"
+binding = "MESSAGE_QUEUE"
 
-[[migrations]]
-tag = "v1"
-new_classes = ["MessagePubSub"]
+[[queues.consumers]]
+queue = "message-queue"
+max_batch_size = 10
+max_batch_timeout = 30
 
 # KV Namespace
 [[kv_namespaces]]
@@ -108,7 +115,7 @@ API_KEY = "change-this-to-your-secret-key"
 # 敏感信息使用 secrets
 ```
 
-### 3.3 设置 Secrets
+### 3.4 设置 Secrets
 
 ```bash
 # Telegram Bot Token（可选）
@@ -118,7 +125,7 @@ wrangler secret put TELEGRAM_BOT_TOKEN
 wrangler secret put TELEGRAM_CHAT_ID
 ```
 
-### 3.4 部署 Worker
+### 3.5 部署 Worker
 
 ```bash
 wrangler deploy
@@ -129,7 +136,7 @@ wrangler deploy
 https://goofish-agent-worker.your-subdomain.workers.dev
 ```
 
-### 3.5 更新本地配置
+### 3.6 更新本地配置
 
 将 Worker URL 更新到本地守护程序的 `.env` 文件中。
 

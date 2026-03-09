@@ -120,7 +120,7 @@ npm start
 ### 云端同步程序
 
 - 接收浏览器消息报告
-- 通过 Durable Objects 发布订阅
+- 通过 Cloudflare Queue 消息队列
 - 管理客户端 SSE 连接
 - 监控在线状态
 - 发送 Telegram 告警

@@ -4,7 +4,7 @@ compatibility_date = "2026-03-08"
 
 # 域名配置
 [[routes]]
-pattern = "goofish-sync.wgy.us.kg"
+pattern = "goofish-agent-worker.wgy.us.kg"
 custom_domain = true
 
 # Durable Objects 配置
@@ -13,18 +13,18 @@ name = "MESSAGE_PUBSUB"
 class_name = "MessagePubSub"
 
 [[migrations]]
-tag = "v1"
+tag = "v3"
 new_sqlite_classes = ["MessagePubSub"]
 
-# KV Namespace 配置
-# 运行 wrangler kv:namespace create GOOFISH_KV 后替换下面的 ID
-[[kv_namespaces]]
-binding = "GOOFISH_KV"
-id = "65b632e92d1b4c05ab8620f091572989"
+# Queue 配置
+[[queues.producers]]
+queue = "message-queue"
+binding = "MESSAGE_QUEUE"
 
-# 定时任务 - 每分钟检查心跳
-[triggers]
-crons = ["* * * * *"]
+[[queues.consumers]]
+queue = "message-queue"
+max_batch_size = 10
+max_batch_timeout = 30
 
 # 环境变量（非敏感信息）
 [vars]
@@ -42,3 +42,9 @@ name = "goofish-agent-worker-dev"
 # 生产环境配置
 [env.production]
 name = "goofish-agent-worker"
+
+# 日志配置
+[observability]
+[observability.logs]
+enabled = true
+invocation_logs = true

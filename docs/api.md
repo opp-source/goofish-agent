@@ -47,11 +47,42 @@ X-API-Key: <your-api-key>
 
 ---
 
-### 1.2 SSE 连接
+### 1.2 消息轮询
+
+**接口**: `GET /events/poll`
+
+**描述**: 本地守护程序通过轮询获取新消息
+
+**查询参数**:
+- `lastTimestamp`: 上次获取的最后消息时间戳（可选，默认为 0）
+
+**请求头**:
+```
+X-API-Key: <your-api-key>
+```
+
+**响应**:
+```json
+{
+  "success": true,
+  "messages": [
+    {
+      "type": "new_message",
+      "sessionId": "53178218440",
+      "timestamp": 1709900000000
+    }
+  ],
+  "timestamp": 1709900100000
+}
+```
+
+---
+
+### 1.3 SSE 连接
 
 **接口**: `GET /events`
 
-**描述**: 本地守护程序建立 SSE 连接，接收实时消息推送
+**描述**: 建立 SSE 连接接收实时消息推送（兼容旧客户端）
 
 **请求头**:
 ```
@@ -71,13 +102,13 @@ Connection: keep-alive
 data: {"type":"connected"}
 
 data: {"type":"new_message","sessionId":"53178218440",...}
-
-data: {"type":"heartbeat"}
 ```
+
+**注意**: SSE 连接会在 60 秒后自动断开，建议使用轮询接口 `/events/poll` 获取消息。
 
 ---
 
-### 1.3 浏览器心跳
+### 1.4 浏览器心跳
 
 **接口**: `POST /heartbeat/browser`
 
@@ -97,7 +128,7 @@ X-API-Key: <your-api-key>
 
 ---
 
-### 1.4 获取系统状态
+### 1.5 获取系统状态
 
 **接口**: `GET /status`
 
@@ -128,7 +159,7 @@ X-API-Key: <your-api-key>
 
 ---
 
-### 1.5 错误报告
+### 1.6 错误报告
 
 **接口**: `POST /api/error`
 

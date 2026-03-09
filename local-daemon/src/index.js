@@ -34,27 +34,13 @@ class LocalDaemon {
     try {
       const sessionExists = await this.tmuxManager.checkSession();
       let claudeRunning = false;
-      let claudeInitialized = false;
 
       if (sessionExists) {
         this.log('info', '检测到已存在的 tmux 会话');
-        try {
-          const claudeIsActive = await this.tmuxManager.isClaudeRunning();
-          
-          if (claudeIsActive) {
-            claudeRunning = true;
-            
-            const status = await this.checkClaudeStatus();
-            
-            if (status === 'ready' || status === 'idle' || status === 'initializing' || status === 'busy') {
-              claudeInitialized = true;
-              this.log('info', `Claude 已在运行并${status === 'ready' || status === 'idle' ? '已就绪' : '正在处理'} (状态: ${status})`);
-            } else {
-              this.log('info', `Claude 已在运行，状态: ${status}，将发送初始化指令`);
-            }
-          }
-        } catch (error) {
-          this.log('warn', `检查 Claude 状态失败: ${error.message}`);
+        const claudeIsActive = await this.tmuxManager.isClaudeRunning();
+        if (claudeIsActive) {
+          claudeRunning = true;
+          this.log('info', 'Claude 已在运行');
         }
       }
 
@@ -66,28 +52,16 @@ class LocalDaemon {
       if (!claudeRunning) {
         await this.tmuxManager.startClaude(this.config.claudePath, this.config.workDir);
         this.log('info', 'Claude 已启动');
-
         await this.sleep(3000);
       }
 
-      if (this.config.initCommand && !claudeInitialized) {
-        await this.tmuxManager.sendToClaude(this.config.initCommand);
-        this.log('info', '已发送初始化指令');
-
-        await this.waitForCompletion(true);
-      } else if (claudeInitialized) {
-        this.log('info', '跳过初始化步骤（Claude 已就绪）');
-      }
-
       await this.cloudClient.connect(this.config.workerUrl, this.config.apiKey);
-      this.log('info', '已连接云端同步程序');
+      this.log('info', '已连接云端服务');
 
       this.cloudClient.on('new_message', (message) => this.handleNewMessage(message));
       this.cloudClient.on('error', (error) => this.handleError(error));
 
       this.log('info', '系统已就绪，等待消息...');
-
-      this.startHeartbeat();
 
     } catch (error) {
       this.log('error', `启动失败: ${error.message}`);
