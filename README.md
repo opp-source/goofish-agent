@@ -1,254 +1,279 @@
 # 闲鱼销售 Agent 系统
 
-自动化闲鱼店铺客服系统，基于 Claude Code + Cloudflare Worker 实现。
+自动化闲鱼店铺客服系统，基于 Claude Code 实现。
 
 ## 功能特性
 
-- 自动监控买家消息
-- 智能回复客户咨询
-- 订单流程管理（待发货、待收货等）
-- 异常情况 Telegram 告警
-- Web 状态监控页面
+- ✅ 自动监控买家消息
+- ✅ 智能回复客户咨询
+- ✅ 订单流程管理（待发货、待收货等）
+- ✅ Web 状态监控页面（实时更新）
+- ✅ 实时屏幕输出显示
+- ✅ HTTP API 接口
+- ✅ SSE 实时事件推送
+- ✅ 状态持久化存储
 
 ## 系统架构
 
 ```
-┌──────────────┐       ┌──────────────┐
-│ 本地守护程序  │◄─────►│ 云端同步程序  │
-│  (Node.js)   │  SSE  │ (CF Worker)  │
-└──────┬───────┘       └──────┬───────┘
-       │                       │
-       ▼                       ▼
-┌──────────────┐       ┌──────────────┐
-│ Claude Agent │       │ Telegram Bot │
-└──────┬───────┘       └──────────────┘
-       │
-       ▼
-┌──────────────┐
-│ 闲鱼网页     │
-│ + 注入脚本   │
-└──────────────┘
+浏览器（闲鱼）+ 注入脚本
+    ↓ HTTPS
+Cloudflare Tunnel (goofish-agent.wgy.us.kg)
+    ↓ HTTP localhost:8888
+Agent Server (Node.js HTTP)
+    ↓ tmux
+Claude Agent
+    ↓ devtools-mcp
+浏览器回复客户
 ```
+
+## 快速开始
+
+### 1. 安装依赖
+
+```bash
+cd local-daemon
+npm install
+```
+
+### 2. 配置环境变量
+
+```bash
+cp .env.example .env
+# 编辑 .env 文件
+```
+
+关键配置：
+- `PORT`: HTTP 服务端口（默认 8888）
+- `API_KEY`: API 密钥（浏览器注入脚本需要使用）
+- `TMUX_SESSION`: tmux 会话名称
+- `CLAUDE_PATH`: Claude 可执行文件路径
+- `WORK_DIR`: 工作目录（sales-agent 路径）
+
+### 3. 启动服务
+
+```bash
+npm start
+```
+
+服务将在 `http://localhost:8888` 启动。
+
+### 4. 访问控制台
+
+- 本地访问：`http://localhost:8888/`
+- 公网访问：`https://goofish-agent.wgy.us.kg/`
 
 ## 目录结构
 
 ```
 goofish-agent/
-├── .claude/                    # Claude 配置和技能
-│   ├── CLAUDE.md              # Claude 职责规则
-│   ├── .mcp.json              # MCP 配置
-│   ├── skills/                # 技能目录
-│   │   └── goofish-web/       # 闲鱼 Web 操作技能
-│   │       ├── SKILL.md
-│   │       ├── references/
-│   │       └── scripts/
-│   └── agents/                # Agent 目录
-│       └── goofish-agent/     # 闲鱼销售 Agent
-│           └── AGENT.md
-├── local-daemon/              # 本地守护程序
+├── local-daemon/              # Agent 服务端
 │   ├── src/
+│   │   ├── index.js          # HTTP Server 主程序
+│   │   ├── tmux-manager.js   # tmux 管理
+│   │   └── state-manager.js  # 状态持久化
+│   ├── data/
+│   │   └── state.json        # 状态数据文件
 │   ├── package.json
-│   └── .env.example
-├── cloud-worker/              # Cloudflare Worker
-│   ├── src/
-│   ├── wrangler.toml
-│   └── package.json
-├── docs/                      # 文档
-│   ├── architecture.md        # 架构设计
-│   ├── api.md                # API 文档
-│   └── deployment.md         # 部署指南
-└── README.md                  # 本文件
+│   └── .env
+├── sales-agent/              # Claude Agent 配置
+│   └── .claude/
+│       ├── agents/
+│       │   └── goofish-agent/
+│       │       └── AGENT.md
+│       └── skills/
+│           └── goofish-web/
+│               └── scripts/
+│                   └── cloud-integration.js
+└── README.md
 ```
 
-## 快速开始
+## HTTP API 接口
 
-### 方式 1: 使用部署脚本（推荐）
+### 健康检查
 
 ```bash
-# 部署云端 Worker
-./deploy.sh worker
-
-# 配置本地环境
-cd local-daemon
-cp .env.example .env
-# 编辑 .env 填入 Worker URL 和 API Key
-
-# 部署本地守护程序
-./deploy.sh daemon
-
-# 测试部署
-./test.sh all
-
-# 启动系统
-cd local-daemon && npm start
+GET /health
 ```
 
-### 方式 2: 手动部署
+### 状态查询
 
 ```bash
-# 1. 安装依赖
-cd local-daemon && npm install
-cd ../cloud-worker && npm install
-
-# 2. 配置环境变量
-cd ../local-daemon
-cp .env.example .env
-# 编辑 .env 填入配置
-
-# 3. 部署 Worker
-cd ../cloud-worker
-wrangler kv:namespace create GOOFISH_KV
-# 更新 wrangler.toml 中的 KV ID
-wrangler deploy
-
-# 4. 启动守护程序
-cd ../local-daemon
-npm start
+GET /status
 ```
 
-详细步骤请查看 [快速启动指南](docs/quick-start.md) 或 [完整部署指南](docs/deployment.md)。
+### 接收消息
 
-## 核心组件
+```bash
+POST /api/message
+Headers:
+  X-API-Key: your-api-key
+Body:
+{
+  "sessionId": "xxx",
+  "buyerName": "买家名称",
+  "buyerId": "xxx",
+  "lastMessage": "最新消息",
+  "unreadCount": 1,
+  "timestamp": 1234567890
+}
+```
 
-### 本地守护程序
+### 浏览器心跳
 
-- 管理 tmux 会话和 Claude 进程
-- 接收云端消息通知
-- 向 Claude 发送处理指令
-- 监控执行状态
+```bash
+POST /heartbeat/browser
+Body:
+{
+  "timestamp": 1234567890,
+  "status": "active",
+  "unreadCount": 1
+}
+```
 
-### 云端同步程序
+### 获取 Agent 屏幕内容
 
-- 接收浏览器消息报告
-- 通过 Cloudflare Queue 消息队列
-- 管理客户端 SSE 连接
-- 监控在线状态
-- 发送 Telegram 告警
+```bash
+GET /api/agent/screen
+返回:
+{
+  "success": true,
+  "screen": "Agent 的屏幕输出内容",
+  "status": "running",
+  "timestamp": 1234567890
+}
+```
 
-### Claude Agent
+### 浏览器上报消息列表
 
-- 使用 devtools-mcp 操作浏览器
-- 自动处理买家消息
-- 管理订单流程
-- 调用闲鱼 API
+```bash
+POST /api/browser/messages
+Body:
+{
+  "messages": [
+    {
+      "sessionId": "xxx",
+      "buyerName": "买家名称",
+      "buyerId": "xxx",
+      "lastMessage": "最新消息",
+      "unreadCount": 1,
+      "timestamp": 1234567890
+    }
+  ]
+}
+```
 
-### 浏览器注入脚本
+### 实时事件流（SSE）
 
-- 拦截 Fetch 请求检测新消息
-- DOM 监听作为备用方案
-- 向云端报告消息
-- 定期发送心跳
+```bash
+GET /events
+返回: Server-Sent Events 流，每 2 秒推送一次完整状态更新
 
-## 消息处理流程
+Event 格式:
+data: {
+  "server": {...},
+  "browser": {...},
+  "claude": {...},
+  "messages": {...},
+  "agent": {
+    "screen": "屏幕内容",
+    "status": "运行状态"
+  }
+}
+```
+
+## 工作流程
+
+### 初始化流程
+
+1. 启动 Agent Server
+2. 创建 tmux 会话
+3. 启动 Claude Agent
+4. Claude 打开闲鱼页面并注入脚本
+5. 系统进入待命状态
+
+### 消息处理流程
 
 ```
-买家消息 → 闲鱼页面
-         → 注入脚本检测
-         → 云端同步程序
-         → 本地守护程序
-         → Claude Agent
-         → 浏览器操作回复
+浏览器检测到新消息
+    ↓
+POST /api/message
+    ↓
+Agent Server 接收消息
+    ↓
+通过 tmux 发送指令给 Claude
+    ↓
+Claude 通过 devtools-mcp 操作浏览器回复
+    ↓
+继续监听新消息
 ```
 
 ## 配置说明
 
 ### 环境变量
 
-| 变量名 | 说明 | 必填 |
-|--------|------|------|
-| CLOUD_WORKER_URL | Worker 地址 | ✅ |
-| API_KEY | API 密钥 | ✅ |
-| TMUX_SESSION | tmux 会话名 | ✅ |
-| TELEGRAM_BOT_TOKEN | Telegram Bot Token | ❌ |
-| TELEGRAM_CHAT_ID | Telegram Chat ID | ❌ |
+| 变量名 | 说明 | 必填 | 默认值 |
+|--------|------|------|--------|
+| PORT | HTTP 服务端口 | 否 | 8888 |
+| API_KEY | API 密钥 | 是 | - |
+| TMUX_SESSION | tmux 会话名 | 否 | goofish-agent |
+| CLAUDE_PATH | Claude 路径 | 否 | /usr/local/bin/claude |
+| WORK_DIR | 工作目录 | 否 | 当前目录 |
+| LOG_LEVEL | 日志级别 | 否 | info |
+| MESSAGE_TIMEOUT | 处理超时 | 否 | 300000 |
 
-### wrangler.toml
+## 公网访问
 
-详见 [cloud-worker/wrangler.toml](cloud-worker/wrangler.toml)
+系统通过 Cloudflare Tunnel 提供公网 HTTPS 访问：
 
-## API 文档
-
-详见 [API 文档](docs/api.md)
-
-## 监控和告警
-
-### 状态页面
-
-访问 Worker 的 `/status` 端点查看系统状态。
-
-### Telegram 告警
-
-配置 Telegram Bot 后，系统会在以下情况发送告警：
-- 浏览器离线
-- 守护程序离线
-- 消息处理失败
-
-### 日志查看
-
-```bash
-# 守护程序日志
-tail -f /tmp/goofish-daemon.log
-
-# Worker 日志
-cd cloud-worker && wrangler tail
-```
-
-## 开发指南
-
-### 本地开发
-
-```bash
-# 启动守护程序（开发模式）
-cd local-daemon
-npm run dev
-
-# 启动 Worker（本地）
-cd cloud-worker
-wrangler dev
-```
-
-### 测试
-
-```bash
-# 测试 Worker API
-curl -X POST http://localhost:8787/api/message \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: test" \
-  -d '{"type":"test"}'
-
-# 测试 Telegram 通知
-curl -X POST http://localhost:8787/admin/test-notification \
-  -H "X-API-Key: test"
-```
+- 域名：`https://goofish-agent.wgy.us.kg`
+- 指向：`http://localhost:8888`
 
 ## 故障排查
 
-详见 [部署指南 - 故障排查](docs/deployment.md#8-故障排查)
+### 端口被占用
 
-## 安全建议
+```bash
+lsof -i :8888
+```
 
-- 使用强随机 API Key
-- 定期更换密钥
-- Telegram Bot 设置为私有
-- 敏感信息使用 `wrangler secret`
+### Claude 启动失败
+
+检查 Claude 路径：
+```bash
+which claude
+```
+
+### 浏览器注入失败
+
+确保：
+1. 在正确的页面（`https://www.goofish.com/im`）
+2. API_KEY 配置正确
+3. 域名可访问
 
 ## 更新日志
 
+### v2.1.0 (2026-03-09)
+
+- ✨ 新增实时屏幕监控：自动刷新 Cloud Agent 屏幕输出
+- ✨ 新增 SSE 实时推送：页面自动更新，无需手动刷新
+- ✨ 新增浏览器上报消息 API：支持批量上报最近消息
+- 🎨 改进控制台界面：增加屏幕输出显示，去掉手动刷新按钮
+- ⚡ 优化性能：使用 SSE 替代轮询，减少服务器负载
+
+### v2.0.0 (2026-03-09)
+
+- 🎉 架构重构：取消云端 Worker，简化为单一服务端
+- ✨ 新增 HTTP API 接口
+- ✨ 新增 Web 控制台
+- ✨ 新增状态持久化
+- 🗑️ 移除云端依赖
+
 ### v1.0.0 (2026-03-08)
+
 - 初始版本
 - 实现消息自动处理
-- 实现监控告警
-- 实现状态页面
 
 ## 许可证
 
 MIT
-
-## 贡献
-
-欢迎提交 Issue 和 Pull Request。
-
-## 联系方式
-
-- 项目主页: [GitHub](https://github.com/your-repo/goofish-agent)
-- 问题反馈: [Issues](https://github.com/your-repo/goofish-agent/issues)

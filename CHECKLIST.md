@@ -1,244 +1,187 @@
 # 开发检查清单
 
-## 🚀 部署状态（2026-03-08）
+## 🚀 架构重构（v2.0.0）- 2026-03-09
 
-### ✅ 已部署成功
+### ✅ 已完成
 
-**云端 Worker**
-- URL: `https://goofish-agent-worker.wgy.us.kg`
-- KV Namespace ID: `65b632e92d1b4c05ab8620f091572989`
-- API Key: `a9441d97d2e940752a5780111ec6e36588975ad9d4f6c1af88a2e987ce8daa04`
-- Durable Object: `MessagePubSub` (使用 SQLite 后端)
-- 定时任务: 每分钟检查心跳
+**架构简化**
+- ✅ 取消云端 Worker（Cloudflare Worker）
+- ✅ 重构为单一 HTTP Server
+- ✅ 移除 SSE 连接逻辑
+- ✅ 删除 cloud-worker 目录
+- ✅ 删除 cloud-client.js
 
-**本地环境**
-- 配置文件: `local-daemon/.env` 已配置
-- 依赖安装: ✅ 完成
-- 测试脚本: ✅ 可用
+**HTTP Server 实现**
+- ✅ 端口：8888
+- ✅ 健康检查接口：GET /health
+- ✅ 状态查询接口：GET /status
+- ✅ 消息接收接口：POST /api/message
+- ✅ 浏览器心跳接口：POST /heartbeat/browser
+- ✅ 配置查询接口：GET /api/config
+- ✅ 消息列表接口：GET /api/messages
+- ✅ Claude 状态接口：GET /api/claude/status
 
-**已测试功能**
-- ✅ 状态页面: `/status`
-- ✅ 心跳接口: `/heartbeat/daemon`, `/heartbeat/browser`
-- ✅ 消息接口: `/api/message`
-- ✅ SSE 连接: `/events` (已修复)
-- ✅ API 认证: Bearer token
+**状态管理**
+- ✅ 状态持久化到 JSON 文件
+- ✅ 服务器状态监控
+- ✅ 浏览器状态监控
+- ✅ Claude 状态监控
+- ✅ 消息历史记录（最近 100 条）
+
+**Web 控制台**
+- ✅ 服务器运行状态
+- ✅ 浏览器连接状态
+- ✅ Claude Agent 状态
+- ✅ 最近消息列表
+- ✅ 自动刷新（30秒）
+
+**浏览器注入脚本**
+- ✅ 更新域名配置
+- ✅ 心跳上报（60秒）
+- ✅ 消息检测和上报
+
+**文档更新**
+- ✅ 更新 README.md
+- ✅ 创建 Cloudflare Tunnel 配置指南
+- ✅ 创建测试脚本
 
 ### 📝 待测试
-- [x] 启动本地守护程序完整流程 ✅ (2026-03-08)
+
+- [x] 启动服务完整流程
 - [ ] 浏览器注入脚本实际运行
-- [x] 端到端消息流转 ✅ (2026-03-08)
-- [ ] Telegram 通知（需配置）
+- [ ] 端到端消息流转
+- [ ] 状态持久化验证
 
-### 🔧 已修复问题
-1. **SSE 实现**: 修复了 ReadableStream 中 `this` 上下文问题
-2. **状态页面**: 修复了缺少 `request` 参数的问题
-3. **Durable Objects**: 使用 `new_sqlite_classes` 替代 `new_classes`
-4. **消息发布**: 修复了 Durable Object 中数据双重编码问题
-5. **SSE 连接**: 优化了 CloudClient 的连接等待逻辑
-6. **消息格式**: 改进消息构建，避免特殊字符导致的解析问题
-7. **Claude 路径**: 更新为正确的 Claude 安装路径
+### 🎯 下一步
 
-### 📊 快速测试命令
-
-```bash
-# 查看状态
-curl https://goofish-agent-worker.wgy.us.kg/status | jq
-
-# 测试 SSE
-curl -N https://goofish-agent-worker.wgy.us.kg/events
-
-# 发送测试消息
-curl -X POST https://goofish-agent-worker.wgy.us.kg/api/message \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: a9441d97d2e940752a5780111ec6e36588975ad9d4f6c1af88a2e987ce8daa04" \
-  -d '{"type":"test","buyerName":"测试","lastMessage":"你好"}'
-
-# 访问状态页面（浏览器）
-open https://goofish-agent-worker.wgy.us.kg/status
-
-# 查看守护程序日志
-tail -f /tmp/goofish-daemon.log
-
-# 查看 tmux 会话
-tmux attach -t goofish-agent
-```
-
-### ✅ 测试结果（2026-03-08）
-
-**本地守护程序**
-- ✅ 成功启动并保持运行
-- ✅ SSE 连接稳定
-- ✅ 心跳机制正常
-- ✅ 消息接收正常
-
-**消息流转**
-- ✅ Worker 接收消息成功
-- ✅ 消息推送到守护程序成功
-- ✅ Claude 接收指令正常
-- ✅ 消息格式正确显示
-
----
-
-## 项目初始化
-
-- [x] 创建项目目录结构
-- [x] 编写架构设计文档
-- [x] 编写 API 文档
-- [x] 编写部署指南
-- [x] 编写 README
-
-## 本地守护程序
-
-- [x] 创建 package.json
-- [x] 创建 .env.example
-- [x] 实现主程序 (src/index.js)
-- [x] 实现 tmux 管理器 (src/tmux-manager.js)
-- [x] 实现云端客户端 (src/cloud-client.js)
-- [ ] 添加单元测试
-- [ ] 完善错误处理
-- [ ] 添加日志轮转
-
-## 云端同步程序
-
-- [x] 创建 package.json
-- [x] 创建 wrangler.toml
-- [x] 实现 Worker 入口 (src/index.js)
-- [x] 实现 Durable Object (src/durable-object.js)
-- [x] 实现监控任务 (src/monitor.js)
-- [x] 实现 Telegram 通知 (src/telegram.js)
-- [x] 实现状态页面 (src/status-page.js)
-- [x] 修复 SSE 连接问题
-- [ ] 添加请求限流
-- [ ] 添加更详细的错误日志
-
-## Agent 配置
-
-- [x] 创建 .claude/CLAUDE.md
-- [x] 创建 .claude/.mcp.json
-- [x] 创建 Agent 定义 (.claude/agents/goofish-agent/AGENT.md)
-- [x] 复制闲鱼 Web 技能文件
-- [ ] 完善 Agent 提示词
-- [ ] 添加更多业务场景处理
-
-## 浏览器注入脚本
-
-- [x] 复制消息监听脚本
-- [x] 复制 API 定义
-- [x] 创建云端集成脚本
-- [ ] 集成到 Agent 初始化流程
-- [ ] 添加自动注入功能
-
-## 部署相关
-
-- [x] 创建 launchd 配置示例
-- [x] 编写部署步骤
-- [x] 创建部署脚本 (deploy.sh)
-- [x] 创建测试脚本 (test.sh)
-- [x] 创建 KV Namespace
-- [x] 部署 Worker 到 Cloudflare
-- [x] 配置 API Key (Secret)
-- [x] 配置本地环境 (.env)
-- [x] 测试 Worker API
-- [x] 修复 SSE 实现
-- [x] 测试本地守护程序完整流程 ✅ (2026-03-08)
-- [x] 测试端到端消息流转 ✅ (2026-03-08)
-
-## 文档完善
-
-- [x] 架构设计文档
-- [x] API 文档
-- [x] 部署指南
-- [x] 快速启动指南
-- [ ] 添加故障排查手册
-- [ ] 添加性能调优指南
-- [ ] 添加贡献指南
-
-## 功能增强
-
-- [ ] 支持多账号
-- [ ] 添加消息模板管理
-- [ ] 添加黑名单功能
-- [ ] 添加数据统计
-- [ ] 支持 WebSocket 作为 SSE 的替代方案
-
-## 安全加固
-
-- [x] API Key 认证
-- [x] CORS 配置
-- [ ] 请求签名验证
-- [ ] 敏感数据加密
-- [ ] 访问日志审计
-
-## 监控告警
-
-- [x] 心跳检测
-- [x] Telegram 告警
-- [x] 状态页面
-- [ ] Prometheus 指标导出
-- [ ] Grafana 仪表板
-
-## 下一步工作
-
-### 立即可做
-1. ~~**启动守护程序测试**~~ ✅ 已完成
+1. **启动测试**
    ```bash
    cd local-daemon
    npm start
    ```
-   
-2. ~~**测试消息流转**~~ ✅ 已完成
-   - 发送测试消息到 Worker
-   - 验证守护程序接收
-   - 检查处理流程
 
-3. **浏览器注入测试**
-   - 打开闲鱼消息页面
-   - 注入云端集成脚本
-   - 验证消息监听
+2. **运行测试脚本**
+   ```bash
+   ./test-server.sh
+   ```
 
-### 后续优化
-1. **完善 Agent 提示词**
-   - 增加业务场景处理
-   - 提高回复质量
-
-2. **添加测试**
-   - 单元测试
-   - 集成测试
-   - 端到端测试
-
-3. **监控告警**
-   - 配置 Telegram Bot
-   - 完善日志系统
-
-### 功能增强
-- 支持多账号
-- 添加消息模板管理
-- 添加黑名单功能
-- 添加数据统计
+3. **测试浏览器注入**
+   - 打开 https://www.goofish.com/im
+   - 注入 cloud-integration.js
+   - 验证心跳和消息上报
 
 ---
 
-## 📁 重要文件位置
+## 项目结构（v2.0.0）
+
+```
+goofish-agent/
+├── local-daemon/              # Agent 服务端
+│   ├── src/
+│   │   ├── index.js          # HTTP Server 主程序
+│   │   ├── tmux-manager.js   # tmux 管理
+│   │   └── state-manager.js  # 状态持久化
+│   ├── data/
+│   │   └── state.json        # 状态数据文件
+│   ├── package.json
+│   ├── .env                  # 配置文件
+│   └── .env.example          # 配置模板
+├── sales-agent/              # Claude Agent 配置
+│   └── .claude/
+│       ├── agents/
+│       │   └── goofish-agent/
+│       │       └── AGENT.md  # Agent 定义
+│       └── skills/
+│           └── goofish-web/
+│               └── scripts/
+│                   └── cloud-integration.js  # 浏览器注入脚本
+├── docs/                     # 文档
+│   ├── architecture.md       # 架构设计
+│   ├── api.md               # API 文档
+│   └── quick-start.md       # 快速开始
+├── test-server.sh           # 测试脚本
+└── README.md                # 项目说明
+```
+
+## API 接口
+
+### 健康检查
+```bash
+GET /health
+```
+
+### 状态查询
+```bash
+GET /status
+```
+
+### 接收消息
+```bash
+POST /api/message
+Headers: X-API-Key: <your-api-key>
+Body: {
+  "sessionId": "xxx",
+  "buyerName": "买家名称",
+  "lastMessage": "最新消息",
+  "unreadCount": 1,
+  "timestamp": 1234567890
+}
+```
+
+### 浏览器心跳
+```bash
+POST /heartbeat/browser
+Body: {
+  "timestamp": 1234567890,
+  "status": "active",
+  "unreadCount": 1
+}
+```
+
+## 配置说明
+
+### 环境变量
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| PORT | HTTP 服务端口 | 8888 |
+| API_KEY | API 密钥 | - |
+| TMUX_SESSION | tmux 会话名 | goofish-agent |
+| CLAUDE_PATH | Claude 路径 | /usr/local/bin/claude |
+| WORK_DIR | 工作目录 | 当前目录 |
+| LOG_LEVEL | 日志级别 | info |
+| MESSAGE_TIMEOUT | 处理超时(ms) | 300000 |
+
+## 重要文件位置
 
 ### 配置文件
-- 云端配置: `cloud-worker/wrangler.toml`
-- 本地配置: `local-daemon/.env`
-- Agent 配置: `.claude/agents/goofish-agent/AGENT.md`
+- 服务配置: `local-daemon/.env`
+- Agent 配置: `sales-agent/.claude/agents/goofish-agent/AGENT.md`
+- 状态数据: `local-daemon/data/state.json`
 
 ### 脚本文件
-- 部署脚本: `deploy.sh`
-- 测试脚本: `test.sh`
-- 云端集成: `.claude/skills/goofish-web/scripts/cloud-integration.js`
-- 消息监听: `.claude/skills/goofish-web/scripts/message-listener.js`
-
-### 文档
-- 快速启动: `docs/quick-start.md`
-- 完整部署: `docs/deployment.md`
-- API 文档: `docs/api.md`
-- 架构说明: `docs/architecture.md`
+- 测试脚本: `test-server.sh`
+- 浏览器注入: `sales-agent/.claude/skills/goofish-web/scripts/cloud-integration.js`
 
 ### 核心代码
-- Worker 入口: `cloud-worker/src/index.js`
-- Durable Object: `cloud-worker/src/durable-object.js`
-- 守护程序: `local-daemon/src/index.js`
-- 云端客户端: `local-daemon/src/cloud-client.js`
+- HTTP Server: `local-daemon/src/index.js`
+- 状态管理: `local-daemon/src/state-manager.js`
+- tmux 管理: `local-daemon/src/tmux-manager.js`
+
+---
+
+## 历史版本
+
+### v1.0.0 (2026-03-08)
+- 初始版本
+- 云端 + 本地架构
+- SSE 连接
+- Durable Objects
+- Queue 消息队列
+
+### v2.0.0 (2026-03-09)
+- 架构重构：取消云端
+- 简化为单一 HTTP Server
+- 状态持久化
+- Web 控制台
+- Cloudflare Tunnel 支持

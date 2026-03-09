@@ -1,0 +1,115 @@
+{
+  "server": {
+    "startTime": 1773065923949,
+    "port": 8888,
+    "version": "2.0.0",
+    "status": "running"
+  },
+  "browser": {
+    "lastHeartbeat": 1773065169942,
+    "status": "online",
+    "unreadCount": 0,
+    "reportedCount": 4,
+    "lastMessage": null
+  },
+  "claude": {
+    "status": "starting",
+    "lastCheck": 1773065923976,
+    "messageProcessed": 0
+  },
+  "messages": [
+    {
+      "timestamp": 1773061541270,
+      "type": "buyer_message",
+      "buyerName": "通知消息",
+      "lastMessage": "🧧瓜分红包账户更新提醒",
+      "unreadCount": 5,
+      "time": "1小时前",
+      "receivedAt": 1773061541981
+    },
+    {
+      "timestamp": 1773061389904,
+      "type": "unread_update",
+      "totalUnread": 10,
+      "conversations": [
+        {
+          "sessionName": "未知会话",
+          "unreadCount": 5
+        },
+        {
+          "sessionName": "5通知消息🧧瓜分红包账户更新提醒1小时前",
+          "unreadCount": 5
+        }
+      ],
+      "receivedAt": 1773061390775
+    },
+    {
+      "timestamp": 1773061339898,
+      "type": "unread_update",
+      "totalUnread": 12,
+      "conversations": [
+        {
+          "sessionName": "未知会话",
+          "unreadCount": 6
+        },
+        {
+          "sessionName": "1爱吃垫江肉干的青梅li怎么卖？3分钟前",
+          "unreadCount": 1
+        },
+        {
+          "sessionName": "5通知消息🧧瓜分红包账户更新提醒1小时前",
+          "unreadCount": 5
+        }
+      ],
+      "receivedAt": 1773061340948
+    },
+    {
+      "sessionId": "test-session-1773059559391",
+      "buyerName": "测试买家 73",
+      "buyerId": "buyer-409",
+      "lastMessage": "这是一条测试消息，时间: 20:32:39",
+      "unreadCount": 1,
+      "timestamp": 1773059559392,
+      "receivedAt": 1773059559393
+    },
+    {
+      "sessionId": "test-session-1773059549397",
+      "buyerName": "测试买家 97",
+      "buyerId": "buyer-363",
+      "lastMessage": "这是一条测试消息，时间: 20:32:29",
+      "unreadCount": 1,
+      "timestamp": 1773059549406,
+      "receivedAt": 1773059549415
+    },
+    {
+      "sessionId": "browser-test-001",
+      "buyerName": "浏览器测试买家",
+      "buyerId": "browser-buyer-001",
+      "lastMessage": "这是通过浏览器上报的消息",
+      "unreadCount": 1,
+      "timestamp": 1773059462000,
+      "receivedAt": 1773059462973
+    },
+    {
+      "sessionId": "test-session-001",
+      "buyerName": "测试买家",
+      "buyerId": "test-buyer-001",
+      "lastMessage": "你好，商品还在吗？",
+      "unreadCount": 1,
+      "timestamp": 1773058811000,
+      "itemPrice": "99.00",
+      "itemUrl": "https://www.goofish.com/item?id=test",
+      "receivedAt": 1773058811912
+    }
+  ],
+  "config": {
+    "port": 8888,
+    "apiKey": "a9441d97d2e940752a5780111ec6e36588975ad9d4f6c1af88a2e987ce8daa04",
+    "tmuxSession": "goofish-agent",
+    "claudePath": "/Users/wenguoyin/.local/bin/claude",
+    "workDir": "/Users/wenguoyin/Public/goofish-agent/sales-agent",
+    "logLevel": "info",
+    "messageTimeout": 300000,
+    "initCommand": "/goofish-init"
+  }
+}

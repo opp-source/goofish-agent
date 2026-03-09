@@ -1,12 +1,20 @@
 /**
- * 闲鱼云端集成脚本
- * 在闲鱼消息页面中运行，集成云端通信和心跳功能
+ * 闲鱼云端集成脚本（XHR + WebSocket 拦截版）
+ * 通过拦截 XHR 和 WebSocket 请求获取消息数据
+ *
+ * 发现：
+ * - 闲鱼使用 XMLHttpRequest (XHR) 而不是 fetch
+ * - session.sync 默认只请求 sessionTypes: [3] (系统消息)
+ * - 买家消息会话列表通过 WebSocket (ACCS) 推送
+ * - 具体消息内容通过 user.query API 获取
  *
  * 功能：
- * 1. 心跳上报到云端
- * 2. 消息检测和上报
- * 3. 未读会话扫描
- * 4. 状态面板显示
+ * 1. 拦截 XHR 请求 (session.sync, user.query)
+ * 2. 拦截 WebSocket 消息
+ * 3. 解析会话同步和用户消息
+ * 4. 上报买家消息到云端
+ * 5. 心跳保活
+ * 6. 状态面板显示
  */
 
 (function() {
@@ -14,32 +22,25 @@
 
   // 配置
   const CONFIG = {
-    // 云端 Worker 地址
-    cloudWorkerUrl: 'https://goofish-agent-worker.wgy.us.kg',
-    // API Key
+    cloudWorkerUrl: 'https://goofish-agent.wgy.us.kg',
     apiKey: 'a9441d97d2e940752a5780111ec6e36588975ad9d4f6c1af88a2e987ce8daa04',
-    // 心跳间隔（秒）
     heartbeatInterval: 60,
-    // 消息检测间隔（毫秒）
-    messagePollInterval: 10000,
-    // 是否显示状态浮窗
     showStatusPanel: true,
-    // 调试模式
     debug: true
   };
 
   // 状态
   let state = {
     isRunning: false,
-    lastUnreadCount: 0,
     heartbeatTimer: null,
-    messagePollTimer: null,
     connectionStatus: 'disconnected',
     lastHeartbeatTime: null,
-    reportedCount: 0
+    reportedCount: 0,
+    processedMessages: new Set(),
+    sessions: new Map(),
+    wsConnections: []
   };
 
-  // 状态面板元素
   let statusPanel = null;
 
   // 日志
@@ -49,16 +50,11 @@
     }
   }
 
-  function error(...args) {
-    console.error('[闲鱼Agent]', new Date().toISOString(), ...args);
-  }
-
   // ================== 状态面板 ==================
 
   function createStatusPanel() {
     if (!CONFIG.showStatusPanel) return;
 
-    // 移除已存在的面板
     const existingPanel = document.getElementById('xianyu-agent-status-panel');
     if (existingPanel) {
       existingPanel.remove();
@@ -110,6 +106,9 @@
         .xianyu-status-dot.disconnected {
           background: #fbbf24;
         }
+        .xianyu-status-dot.error {
+          background: #f87171;
+        }
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
@@ -131,8 +130,8 @@
         <span id="xianyu-heartbeat-time">--</span>
       </div>
       <div class="xianyu-panel-row">
-        <span>未读</span>
-        <span id="xianyu-unread-count">0</span>
+        <span>会话</span>
+        <span id="xianyu-session-count">0</span>
       </div>
       <div class="xianyu-panel-row">
         <span>上报</span>
@@ -150,7 +149,7 @@
     const statusDot = statusPanel.querySelector('.xianyu-status-dot');
     const statusText = statusPanel.querySelector('#xianyu-status-text');
     const heartbeatTime = statusPanel.querySelector('#xianyu-heartbeat-time');
-    const unreadCount = statusPanel.querySelector('#xianyu-unread-count');
+    const sessionCount = statusPanel.querySelector('#xianyu-session-count');
     const reportedCount = statusPanel.querySelector('#xianyu-reported-count');
 
     // 更新状态点
@@ -170,7 +169,7 @@
     }
 
     // 更新统计
-    unreadCount.textContent = state.lastUnreadCount;
+    sessionCount.textContent = state.sessions.size;
     reportedCount.textContent = state.reportedCount;
   }
 
@@ -201,8 +200,7 @@
           },
           body: JSON.stringify({
             timestamp: Date.now(),
-            status: 'active',
-            unreadCount: state.lastUnreadCount
+            status: 'active'
           })
         });
 
@@ -211,12 +209,12 @@
         }
 
         const data = await response.json();
-        log('心跳成功:', data);
+        log('心跳成功');
         state.connectionStatus = 'connected';
         state.lastHeartbeatTime = Date.now();
         return data;
       } catch (err) {
-        error('心跳失败:', err.message);
+        console.error('[闲鱼Agent] 心跳失败:', err.message);
         state.connectionStatus = 'error';
         return null;
       }
@@ -242,157 +240,245 @@
         }
 
         const data = await response.json();
-        log('消息上报成功:', data);
+        log('消息上报成功:', messageData.type, messageData.buyerName || '', messageData.lastMessage || messageData.message || '');
         state.reportedCount++;
         return data;
       } catch (err) {
-        error('消息上报失败:', err.message);
+        console.error('[闲鱼Agent] 消息上报失败:', err.message);
         return null;
       }
     }
   };
 
-  // ================== 消息检测器 ==================
+  // ================== 网络请求处理 ==================
 
-  const MessageReporter = {
-    // 获取当前聊天窗口信息
-    getCurrentChatInfo() {
-      const main = document.querySelector('main');
-      if (!main) return null;
+  /**
+   * 处理会话同步响应
+   * API: mtop.taobao.idlemessage.pc.session.sync
+   * 返回会话列表，包含未读数和最新消息摘要
+   */
+  function handleSessionSync(data) {
+    const sessions = data?.sessions || [];
+    log('会话同步:', sessions.length, '个会话');
 
-      const allText = main.innerText || '';
-      const lines = allText.split('\n').filter(l => l.trim());
+    sessions.forEach(session => {
+      const sessionId = session.session?.sessionId;
+      const summary = session.message?.summary || {};
+      const userInfo = session.session?.userInfo || {};
+      const ownerInfo = session.session?.ownerInfo || {};
 
-      // 第一行通常是买家名 (格式: "猫猫狗狗 (x***6)")
-      let buyerName = lines[0] || '';
-      if (buyerName.includes('(')) {
-        buyerName = buyerName.split('(')[0].trim();
-      }
-
-      // 提取商品链接
-      const itemLink = main.querySelector('a[href*="item?id="]');
-      const itemUrl = itemLink ? itemLink.href : '';
-
-      // 提取商品价格
-      const priceMatch = allText.match(/¥([\d.]+)/);
-      const itemPrice = priceMatch ? priceMatch[1] : '';
-
-      return { buyerName, itemUrl, itemPrice };
-    },
-
-    // 扫描未读会话
-    scanUnreadConversations() {
-      const sidebar = document.querySelector('[role="complementary"]');
-      if (!sidebar) return [];
-
-      const unreadList = [];
-
-      // 查找未读标记
-      const badges = sidebar.querySelectorAll('[class*="badge"]');
-      badges.forEach(badge => {
-        const count = parseInt(badge.textContent);
-        if (count > 0) {
-          // 查找会话名称
-          let parent = badge.parentElement;
-          let sessionName = '未知会话';
-
-          for (let i = 0; i < 5 && parent; i++) {
-            const text = parent.textContent || '';
-            const lines = text.split('\n').filter(l => l.trim());
-            if (lines.length > 0 && lines[0] !== count.toString()) {
-              sessionName = lines[0];
-              break;
-            }
-            parent = parent.parentElement;
-          }
-
-          unreadList.push({
-            sessionName,
-            unreadCount: count
-          });
-        }
+      // 存储会话信息
+      state.sessions.set(sessionId, {
+        sessionId,
+        sessionType: session.session?.sessionType,
+        buyerName: userInfo.nick || ownerInfo.fishNick || '未知',
+        buyerId: userInfo.userId || ownerInfo.userId,
+        lastMessage: summary.summary,
+        unreadCount: summary.unread || 0,
+        timestamp: summary.ts
       });
 
-      return unreadList;
-    },
+      // 上报有未读的会话（排除系统消息 sessionType=3 或 userInfo.type=10）
+      if (summary.unread > 0 && session.session?.sessionType !== 3 && userInfo.type !== 10) {
+        const msgKey = `session-${sessionId}-${summary.ts}`;
+        if (!state.processedMessages.has(msgKey)) {
+          state.processedMessages.add(msgKey);
 
-    // 获取最新买家消息
-    getLatestBuyerMessage() {
-      const main = document.querySelector('main');
-      if (!main) return null;
-
-      const allText = main.innerText || '';
-      const lines = allText.split('\n').filter(l => l.trim());
-
-      // 从后往前找买家消息
-      // 逻辑：找到"未读"标记，往前找第一条非卖家消息
-      const unreadIndex = lines.findIndex(l => l === '未读');
-
-      if (unreadIndex > 0) {
-        for (let i = unreadIndex - 1; i >= 0; i--) {
-          const line = lines[i].trim();
-
-          // 跳过时间和状态
-          if (/^\d{1,2}:\d{2}$/.test(line)) continue;
-          if (line === '已读' || line === '未读') continue;
-
-          // 卖家消息，停止
-          if (line === '我说停停') break;
-
-          // 可能是买家消息
-          if (line.length > 0 && line.length < 200) {
-            // 获取聊天信息
-            const chatInfo = this.getCurrentChatInfo();
-
-            // 排除买家名自己
-            if (chatInfo && line === chatInfo.buyerName) continue;
-
-            return {
-              buyerName: chatInfo ? chatInfo.buyerName : '未知',
-              message: line,
-              itemUrl: chatInfo ? chatInfo.itemUrl : '',
-              itemPrice: chatInfo ? chatInfo.itemPrice : ''
-            };
-          }
+          CloudAPI.reportMessage({
+            type: 'buyer_message',
+            sessionId: String(sessionId),
+            buyerName: userInfo.nick || ownerInfo.fishNick || '未知',
+            buyerId: userInfo.userId || ownerInfo.userId,
+            lastMessage: summary.summary,
+            unreadCount: summary.unread,
+            timestamp: summary.ts
+          });
         }
       }
+    });
+  }
 
-      return null;
-    },
+  /**
+   * 处理用户消息查询响应
+   * API: mtop.taobao.idlemessage.pc.user.query
+   * 返回具体聊天消息
+   */
+  function handleUserQuery(data) {
+    const userInfo = data?.userInfo || {};
+    const messages = data?.messages || [];
 
-    // 检查并上报
-    async checkAndReport() {
-      const unread = this.scanUnreadConversations();
-      const totalUnread = unread.reduce((sum, u) => sum + u.unreadCount, 0);
+    log('用户消息查询:', userInfo.nick, '消息数:', messages.length);
 
-      // 更新未读数
-      if (totalUnread !== state.lastUnreadCount) {
-        state.lastUnreadCount = totalUnread;
-        log('未读数变化:', totalUnread);
+    messages.forEach(msg => {
+      // fromType: 0=对方发送(买家), 1=我发送(卖家)
+      if (msg.fromType === 0) {
+        const msgKey = `msg-${msg.msgId || msg.uuid}`;
+        if (!state.processedMessages.has(msgKey)) {
+          state.processedMessages.add(msgKey);
+
+          CloudAPI.reportMessage({
+            type: 'buyer_message',
+            buyerName: userInfo.nick || userInfo.fishNick || '未知',
+            buyerId: userInfo.userId,
+            message: msg.content,
+            contentType: msg.contentType,
+            timestamp: msg.gmtCreate
+          });
+        }
       }
+    });
+  }
 
-      // 检查最新消息
-      const latestMsg = this.getLatestBuyerMessage();
-      if (latestMsg) {
-        log('检测到买家消息:', latestMsg);
+  // ================== XHR 拦截 ==================
 
-        // 上报到云端
-        await CloudAPI.reportMessage({
-          type: 'buyer_message',
-          sessionId: latestMsg.itemUrl || 'unknown',
-          buyerName: latestMsg.buyerName || '未知买家',
-          buyerId: 'unknown',
-          lastMessage: latestMsg.message || '',
-          unreadCount: totalUnread,
-          itemPrice: latestMsg.itemPrice || '',
-          itemUrl: latestMsg.itemUrl || '',
-          timestamp: Date.now()
+  /**
+   * 拦截 XMLHttpRequest
+   * 闲鱼使用 XHR 而不是 fetch API
+   */
+  function interceptXHR() {
+    const originalXHROpen = XMLHttpRequest.prototype.open;
+    const originalXHRSend = XMLHttpRequest.prototype.send;
+
+    XMLHttpRequest.prototype.open = function(method, url) {
+      this._url = url;
+      return originalXHROpen.apply(this, arguments);
+    };
+
+    XMLHttpRequest.prototype.send = function() {
+      const xhr = this;
+      const url = xhr._url;
+
+      if (url && url.includes('mtop.taobao.idlemessage')) {
+        xhr.addEventListener('load', function() {
+          try {
+            const json = JSON.parse(xhr.responseText);
+            if (json.ret && json.ret[0] && json.ret[0].includes('SUCCESS')) {
+              // 会话同步 API
+              if (url.includes('session.sync')) {
+                handleSessionSync(json.data);
+              }
+              // 用户消息查询 API
+              else if (url.includes('user.query')) {
+                handleUserQuery(json.data);
+              }
+            }
+          } catch (err) {
+            // 忽略解析错误
+          }
         });
       }
 
-      return { unread, latestMsg };
-    }
-  };
+      return originalXHRSend.apply(this, arguments);
+    };
+
+    log('XHR 拦截已启用');
+  }
+
+  // ================== WebSocket 拦截 ==================
+
+  /**
+   * 拦截 WebSocket
+   * 闲鱼通过 ACCS WebSocket 推送会话列表更新
+   */
+  function interceptWebSocket() {
+    const OriginalWebSocket = window.WebSocket;
+
+    window.WebSocket = function(url, protocols) {
+      log('WebSocket 连接:', url);
+
+      const ws = new OriginalWebSocket(url, protocols);
+      state.wsConnections.push(ws);
+
+      // 拦截消息
+      ws.addEventListener('message', function(event) {
+        const data = event.data;
+
+        // 记录消息（截断长消息）
+        if (typeof data === 'string') {
+          const preview = data.length > 200 ? data.substring(0, 200) + '...' : data;
+          log('WebSocket 消息:', preview);
+
+          // 尝试解析 JSON
+          try {
+            const json = JSON.parse(data);
+
+            // 检查是否包含会话信息
+            if (json.sessionId || json.sessions) {
+              log('WebSocket 会话数据:', json);
+            }
+
+            // 检查是否是新消息通知
+            if (json.type === 'message' || json.msgId) {
+              log('WebSocket 新消息通知');
+            }
+          } catch (e) {
+            // 可能是二进制数据或其他格式
+            if (data.includes('session') || data.includes('message')) {
+              log('WebSocket 可能包含会话/消息数据');
+            }
+          }
+        } else if (data instanceof ArrayBuffer) {
+          // 二进制数据
+          log('WebSocket 二进制消息, 大小:', data.byteLength);
+        }
+      });
+
+      // 拦截 send
+      const originalSend = ws.send;
+      ws.send = function(data) {
+        log('WebSocket 发送:', typeof data === 'string' ? data.substring(0, 100) : 'binary');
+        return originalSend.apply(this, arguments);
+      };
+
+      return ws;
+    };
+
+    // 复制原型和静态属性
+    window.WebSocket.prototype = OriginalWebSocket.prototype;
+    Object.setPrototypeOf(window.WebSocket, OriginalWebSocket);
+
+    log('WebSocket 拦截已启用');
+  }
+
+  /**
+   * 拦截 fetch 请求（备用，闲鱼主要用 XHR）
+   */
+  function interceptFetch() {
+    const originalFetch = window.fetch;
+
+    window.fetch = async function(input, init) {
+      const response = await originalFetch.call(window, input, init);
+      const url = typeof input === 'string' ? input : input.url;
+
+      // 检查是否是闲鱼消息 API
+      if (url.includes('mtop.taobao.idlemessage')) {
+        const clonedResponse = response.clone();
+
+        try {
+          const text = await clonedResponse.text();
+          const json = JSON.parse(text);
+
+          // 检查响应是否成功
+          if (json.ret && json.ret[0]?.includes('SUCCESS')) {
+            // 会话同步 API
+            if (url.includes('session.sync')) {
+              handleSessionSync(json.data);
+            }
+            // 用户消息查询 API
+            else if (url.includes('user.query')) {
+              handleUserQuery(json.data);
+            }
+          }
+        } catch (err) {
+          // 忽略解析错误
+        }
+      }
+
+      return response;
+    };
+
+    log('Fetch 拦截已启用');
+  }
 
   // ================== 心跳定时器 ==================
 
@@ -415,55 +501,6 @@
     }
   }
 
-  // ================== 消息检测定时器 ==================
-
-  function startMessagePolling() {
-    // 立即检查一次
-    MessageReporter.checkAndReport();
-
-    // 定时检查
-    state.messagePollTimer = setInterval(() => {
-      MessageReporter.checkAndReport();
-    }, CONFIG.messagePollInterval);
-
-    log('消息检测已启动，间隔:', CONFIG.messagePollInterval, 'ms');
-  }
-
-  function stopMessagePolling() {
-    if (state.messagePollTimer) {
-      clearInterval(state.messagePollTimer);
-      state.messagePollTimer = null;
-    }
-  }
-
-  // ================== WebSocket 拦截 ==================
-
-  function interceptWebSocket() {
-    // 保存原始 WebSocket
-    const OriginalWebSocket = window.WebSocket;
-
-    window.WebSocket = function(url, protocols) {
-      log('WebSocket 创建:', url);
-
-      const ws = new OriginalWebSocket(url, protocols);
-
-      // 检查是否是闲鱼消息相关的 WebSocket
-      if (url && (url.includes('accs') || url.includes('message'))) {
-        log('检测到闲鱼消息 WebSocket');
-
-        ws.addEventListener('message', (event) => {
-          log('WebSocket 消息:', event.data);
-          // 可以在这里解析消息并上报
-        });
-      }
-
-      return ws;
-    };
-
-    window.WebSocket.prototype = OriginalWebSocket.prototype;
-    log('WebSocket 拦截已启用');
-  }
-
   // ================== 公开 API ==================
 
   window.XianyuCloudIntegration = {
@@ -479,20 +516,22 @@
 
       state.isRunning = true;
 
-      // 初始化
+      // 初始化拦截器（顺序重要：WebSocket 需要在页面加载前拦截）
+      interceptWebSocket();
+      interceptXHR();
+      interceptFetch();
+
+      // 初始化 UI
       createStatusPanel();
       startStatusUpdater();
-      interceptWebSocket();
       startHeartbeat();
-      startMessagePolling();
 
-      log('集成已启动');
+      log('集成已启动（XHR + WebSocket 拦截版）');
     },
 
     // 停止
     stop() {
       stopHeartbeat();
-      stopMessagePolling();
       stopStatusUpdater();
 
       if (statusPanel) {
@@ -512,20 +551,23 @@
 
     // 获取状态
     getState() {
-      return { ...state };
+      return {
+        connectionStatus: state.connectionStatus,
+        lastHeartbeatTime: state.lastHeartbeatTime,
+        reportedCount: state.reportedCount,
+        sessions: Array.from(state.sessions.entries()).map(([k, v]) => v),
+        processedMessages: Array.from(state.processedMessages)
+      };
     },
 
     // 手动发送心跳
     sendHeartbeat: CloudAPI.sendHeartbeat,
 
     // 手动上报消息
-    reportMessage: CloudAPI.reportMessage,
-
-    // 消息检测器
-    reporter: MessageReporter
+    reportMessage: CloudAPI.reportMessage
   };
 
-  log('脚本已加载');
+  log('脚本已加载（网络拦截版）');
   log('使用: XianyuCloudIntegration.start()');
 })();
 

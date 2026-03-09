@@ -1,7 +1,7 @@
 {
-  "name": "goofish-local-daemon",
-  "version": "1.0.0",
-  "description": "闲鱼销售 Agent 本地守护程序",
+  "name": "goofish-agent-server",
+  "version": "2.0.0",
+  "description": "闲鱼销售 Agent 服务端",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
@@ -12,13 +12,12 @@
   "keywords": [
     "goofish",
     "agent",
-    "daemon"
+    "server"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "dotenv": "^16.4.5",
-    "eventsource": "^2.0.2"
+    "dotenv": "^16.4.5"
   },
   "engines": {
     "node": ">=18.0.0"
