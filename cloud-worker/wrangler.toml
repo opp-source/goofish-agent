@@ -2,6 +2,11 @@ name = "goofish-agent-worker"
 main = "src/index.js"
 compatibility_date = "2026-03-08"
 
+# 域名配置
+[[routes]]
+pattern = "goofish-sync.wgy.us.kg"
+custom_domain = true
+
 # Durable Objects 配置
 [[durable_objects.bindings]]
 name = "MESSAGE_PUBSUB"

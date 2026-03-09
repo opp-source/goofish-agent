@@ -46,7 +46,7 @@ export class TmuxManager {
         return;
       }
 
-      const command = `tmux send-keys -t ${this.sessionName} 'cd ${workDir} && ${claudePath} sales-agent --dangerously-skip-permissions'`;
+      const command = `tmux send-keys -t ${this.sessionName} 'cd ${workDir} && ${claudePath} --dangerously-skip-permissions'`;
       await execAsync(command);
       
       await sleep(500);
@@ -126,27 +126,36 @@ export class TmuxManager {
     }
 
     try {
-      const output = await this.captureOutput();
+      const { stdout } = await execAsync(
+        `tmux list-panes -t ${this.sessionName} -F "#{pane_pid}"`
+      );
       
-      if (!output || output.trim() === '') {
+      const panePid = stdout.trim();
+      if (!panePid) {
         return false;
       }
 
-      const lines = output.split('\n');
-      const lastLine = lines[lines.length - 1];
-
-      if (lastLine.includes('bypass permissions') || 
-          lastLine.includes('shift+tab to cycle') || 
-          lastLine.includes('esc to interrupt')) {
-        return true;
+      const { stdout: childrenOutput } = await execAsync(`pgrep -P ${panePid}`);
+      const childPids = childrenOutput.trim().split('\n').filter(Boolean);
+      
+      if (childPids.length === 0) {
+        return false;
       }
 
-      if (output.includes('opencode') || output.includes('I can help') || output.includes('What would you like')) {
-        return true;
-      }
-
-      if (output.includes('chrome-devtools') && output.includes('MCP')) {
-        return true;
+      for (const childPid of childPids) {
+        try {
+          const { stdout: cmdOutput } = await execAsync(
+            `ps -o command= -p ${childPid}`
+          );
+          const command = cmdOutput.trim();
+          
+          if (command.includes('claude') || command.includes('opencode')) {
+            console.log(`检测到 Claude 进程运行中: PID ${childPid}, 命令: ${command}`);
+            return true;
+          }
+        } catch (error) {
+          continue;
+        }
       }
 
       return false;
